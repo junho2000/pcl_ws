@@ -1,5 +1,5 @@
 #include <memory>
-
+#include <iostream>
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/header.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
@@ -8,6 +8,11 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/passthrough.h>
+#include <pcl/ModelCoefficients.h>
+#include <pcl/sample_consensus/method_types.h>
+#include <pcl/sample_consensus/model_types.h>
+#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/filters/extract_indices.h>
 
 using std::placeholders::_1;
 using namespace std::chrono_literals;
@@ -43,15 +48,14 @@ private:
     pcl::PointCloud<pcl::PointXYZ>::Ptr center(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::PointCloud<pcl::PointXYZ>::Ptr x_out(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::PointCloud<pcl::PointXYZ>::Ptr y_out(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr rm_gnd(new pcl::PointCloud<pcl::PointXYZ>);
     
     // Voxelization
-    pcl::PointCloud<pcl::PointXYZ> pc_voxelized;
     pcl::VoxelGrid<pcl::PointXYZ> voxel_filter;
-    float voxelsize = 0.2; // m
+    float voxelsize = 0.15; // m
     voxel_filter.setInputCloud(pointcloud);
     voxel_filter.setLeafSize(voxelsize, voxelsize, voxelsize);
     voxel_filter.filter(*ptr_filtered);
-    // pc_voxelized = *ptr_filtered;
 
     // Pass Through Filter
     float x_offset = 1.5;
@@ -63,21 +67,41 @@ private:
     xfilter.filter(*center);
     xfilter.setFilterLimitsNegative(true);
     xfilter.filter(*x_out);
-
     pcl::PassThrough<pcl::PointXYZ> yfilter;
     yfilter.setInputCloud(center);
     yfilter.setFilterFieldName("y");
     yfilter.setFilterLimits(-y_offset, y_offset);
     yfilter.setFilterLimitsNegative(true);
     yfilter.filter(*y_out);
-
     *y_out += *x_out;
+    *ptr_filtered = *y_out;
     
     // Ground Remover
+    pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients());
+    pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
+    pcl::ExtractIndices<pcl::PointXYZ> extract;
+    pcl::SACSegmentation<pcl::PointXYZ> seg;
+    
+    seg.setOptimizeCoefficients(true);
+    seg.setModelType(pcl::SACMODEL_PLANE);
+    seg.setMethodType(pcl::SAC_RANSAC);
+    seg.setMaxIterations(1000);
+    seg.setDistanceThreshold(0.1);
+    seg.setInputCloud (ptr_filtered);
+    seg.segment (*inliers, *coefficients);
+    if (inliers->indices.size () == 0)
+    {
+      std::cerr << "Could not estimate a planar model for the given dataset." << std::endl;
+    }
+    extract.setInputCloud(ptr_filtered);
+    extract.setIndices(inliers);
+    extract.setNegative(true);
+    extract.filter(*rm_gnd);
+    *ptr_filtered = *rm_gnd;
 
     // publish processed lidar
     sensor_msgs::msg::PointCloud2 cloudmsg;
-    pcl::toROSMsg(*y_out, cloudmsg);
+    pcl::toROSMsg(*ptr_filtered, cloudmsg);
     cloudmsg.header.frame_id = "laser_data_frame";
     cloudmsg.header.stamp = this->get_clock()->now();
     pointcloud_publisher->publish(cloudmsg);
