@@ -6,9 +6,7 @@
 #include <pcl/point_types.h>
 #include <pcl/PCLPointCloud2.h>
 #include <pcl_conversions/pcl_conversions.h>
-
-#include <pcl/visualization/cloud_viewer.h>
-#include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/filters/voxel_grid.h>
 
 using std::placeholders::_1;
 using namespace std::chrono_literals;
@@ -40,15 +38,21 @@ private:
     pcl::fromROSMsg(*cloud_msg, *pointcloud);
 
     // Voxelization
-
+    pcl::PointCloud<pcl::PointXYZ> pc_voxelized;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr ptr_filtered(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::VoxelGrid<pcl::PointXYZ> voxel_filter;
+    float voxelsize = 0.2;
+    voxel_filter.setInputCloud(pointcloud);
+    voxel_filter.setLeafSize(voxelsize, voxelsize, voxelsize);
+    voxel_filter.filter(*ptr_filtered);
+    pc_voxelized = *ptr_filtered;
     // Pass Through Filter
 
     // Ground Remover
-    
 
     // publish processed lidar
     sensor_msgs::msg::PointCloud2 cloudmsg;
-    pcl::toROSMsg(*pointcloud, cloudmsg);
+    pcl::toROSMsg(pc_voxelized, cloudmsg);
     cloudmsg.header.frame_id = "laser_data_frame";
     cloudmsg.header.stamp = this->get_clock()->now();
     pointcloud_publisher->publish(cloudmsg);
