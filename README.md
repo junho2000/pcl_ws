@@ -1,2 +1,2 @@
 # pcl_ws
-wob-racing lidar
+3d lidar processing with ROS2
